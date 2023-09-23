@@ -2,7 +2,7 @@
 
 The goal of this project is to predict which of the provided pairs of questions contain two questions with the same meaning.
 
-Link - [GoogleColab](https://colab.research.google.com/drive/1kTpnNduOLO3GFWlvNFV3pMnlJryMXf6X?usp=sharing)
+Link - [GoogleColab](https://colab.research.google.com/drive/1eR5NSyD7YYzxedUuPKijByw6cTp7mXKe?authuser=1)
 
 ## **Authors**
 
@@ -13,7 +13,7 @@ In this project, we aim to address a common challenge on Quora: the proliferatio
 
 Our goal is to leverage advanced natural language processing techniques to classify whether pairs of questions are duplicates or not. By doing so, we aim to streamline the process of finding high-quality answers, ultimately enhancing the experience for Quora writers, seekers, and readers alike.
 ## **Dataset**
-Download dataset for custom training - [Dataset](https://drive.google.com/file/d/1Vw5I-aolkbgcod0cuh33BB_LWcuHSkMH/view?usp=sharing)
+Download dataset for custom training - [Dataset](https://drive.google.com/file/d/1ge8lHgEk9BSrkRZJEfbLSbYCTGQOwG6b/view?usp=drive_link)
 ## Data fields
 - id - the id of a training set question pair
 - qid1, qid2 - unique ids of each question (only available in train.csv)
