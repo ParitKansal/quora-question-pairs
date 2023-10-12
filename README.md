@@ -2,7 +2,7 @@
 
 The goal of this project is to predict which of the provided pairs of questions contain two questions with the same meaning.
 
-Link - [GoogleColab](https://colab.research.google.com/drive/1eR5NSyD7YYzxedUuPKijByw6cTp7mXKe?authuser=1)
+Link - [GoogleColab](https://github.com/ParitKansal/quora-question-pairs/blob/main/notebook.ipynb)
 
 ## **Authors**
 
@@ -112,7 +112,7 @@ Download dataset for custom training - [Dataset](https://drive.google.com/file/d
     
 ### word2vec
 - Applied pretained model of word2vec of GoogleNews on question1, question2 columns of the preprocessed data.
-- Download dataset after applying preprocessing and word2vec- [Processed Dataset](https://drive.google.com/file/d/1-0FVCRRCBv2kMAibJqtGo4B7ua54g-N8/view?usp=sharing)
+- Download dataset after applying preprocessing and word2vec- [Processed Dataset](https://github.com/ParitKansal/quora-question-pairs/blob/main/Processed_Dataset.csv)
 
 ### Modeling
 - **Type of model selection :**  
