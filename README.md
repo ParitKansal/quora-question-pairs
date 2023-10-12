@@ -5,20 +5,23 @@ The goal of this project is to predict which of the provided pairs of questions 
 Link - [GoogleColab](https://github.com/ParitKansal/quora-question-pairs/blob/main/notebook.ipynb)
 
 ## **Authors**
-
 - [@ParitKansal](https://www.github.com/ParitKansal)
 - [@Pankhuri9026](https://github.com/Pankhuri9026)
+
 ## **Description**
 In this project, we aim to address a common challenge on Quora: the proliferation of similar questions. With over 100 million monthly visitors, it's common for users to ask questions that have already been posed in slightly different ways. This redundancy can lead to inefficiencies as seekers struggle to find the best answers and writers feel compelled to respond to multiple versions of the same question.
 
 Our goal is to leverage advanced natural language processing techniques to classify whether pairs of questions are duplicates or not. By doing so, we aim to streamline the process of finding high-quality answers, ultimately enhancing the experience for Quora writers, seekers, and readers alike.
+
 ## **Dataset**
-Download dataset for custom training - [Dataset](https://drive.google.com/file/d/1ge8lHgEk9BSrkRZJEfbLSbYCTGQOwG6b/view?usp=drive_link)
+Download dataset for custom training - [Dataset](https://www.kaggle.com/c/quora-question-pairs/data)
+
 ## Data fields
 - id - the id of a training set question pair
 - qid1, qid2 - unique ids of each question (only available in train.csv)
 - question1, question2 - the full text of each question
 - is_duplicate - the target variable, set to 1 if question1 and question2 have essentially the same meaning, and 0 otherwise.
+
 ## **Steps**
 ### Import Libraries
 - numpy
