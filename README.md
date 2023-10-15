@@ -7,20 +7,6 @@ This repository contains a comprehensive Jupyter Notebook aimed at analyzing the
 * [Parit Kansal](https://www.github.com/ParitKansal)
 * [Pankhuri Kansal](https://github.com/Pankhuri9026)
 
-## 📌 Table of Contents
-
-1. [Overview](#overview)
-2. [Dataset](#dataset)
-3. [Setup & Installation](#setup--installation)
-4. [Notebook Workflow](#notebook-workflow)
-5. [Feature Engineering Details](#feature-engineering-details)
-6. [Modeling and Evaluation](#modeling-and-evaluation)
-7. [Usage](#usage)
-8. [Requirements](#requirements)
-9. [Contributing](#contributing)
-10. [License](#license)
-11. [References](#references)
-
 ## 📖 Overview
 
 With Quora receiving over 100 million monthly visitors, users frequently post similar questions phrased differently. This project leverages Natural Language Processing (NLP) techniques to determine whether pairs of questions are duplicates, thereby minimizing redundancy and enhancing information retrieval.
