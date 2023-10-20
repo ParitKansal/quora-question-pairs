@@ -152,10 +152,6 @@ We welcome contributions in the following areas:
 
 Please submit a pull request with a clear description of your changes.
 
-## 📝 License
-
-This project is licensed under the [MIT License](LICENSE). Portions of the code have been adapted from sources licensed under [GNU GPL v3.0](https://github.com/ParitKansal/quora-question-pairs/blob/main/LICENSE).
-
 ## 📚 References
 
 * Kaggle Quora Question Pairs Competition
