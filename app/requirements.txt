@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+# torch 2.0.1 has no wheels for Python 3.12+; use Python 3.10 or 3.11
+torch==2.0.1

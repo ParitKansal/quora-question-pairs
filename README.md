@@ -1,48 +1,113 @@
 # Quora Question Pairs — Duplicate Detection
 
-> **Notebook:** [`quora_question_pairs_optimize.ipynb`](quora_question_pairs_optimize.ipynb)
-> Built for scale — every stage from text cleaning to model training is GPU-accelerated or parallelized.
+Detects whether two Quora questions are duplicates. A GPU-accelerated training notebook compares five tuned statistical models against a Siamese bidirectional LSTM; the LSTM won on this run's held-out test set (**F1 0.7986**), and its trained weights ship in this repo behind a ready-to-run FastAPI service.
+
+- **Training notebook:** [`Quora_Question_Pairs.ipynb`](Quora_Question_Pairs.ipynb) (24 sections, end-to-end)
+- **Inference service:** [`app/`](app/) — FastAPI wrapper around the trained Siamese LSTM, CPU-only, no retraining needed
 
 ---
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Performance Optimizations](#performance-optimizations)
-3. [Dataset](#dataset)
-4. [Setup & Installation](#setup--installation)
-5. [Pipeline](#pipeline)
+1. [Quickstart — Run the API](#quickstart--run-the-api)
+2. [Results](#results)
+3. [Project Structure](#project-structure)
+4. [Dataset](#dataset)
+5. [Training Pipeline](#training-pipeline)
 6. [Feature Engineering](#feature-engineering)
-7. [Modeling & Results](#modeling--results)
-8. [Saved Artifacts](#saved-artifacts)
-9. [Inference](#inference)
-10. [Requirements](#requirements)
+7. [Models & Selection](#models--selection)
+8. [Saved Artifacts & Inference](#saved-artifacts--inference)
+9. [Reproducing Training](#reproducing-training)
+10. [API Reference](#api-reference)
 11. [Contributing](#contributing)
 12. [Authors](#authors)
 
 ---
 
-## Overview
+## Quickstart — Run the API
 
-With Quora receiving over 100 million monthly visitors, users frequently post semantically equivalent questions phrased differently. This project applies NLP and machine learning to classify whether a given pair of questions are duplicates — reducing content redundancy and improving information retrieval.
+The trained model (`artifacts/siamese_model.pt` + `artifacts/siamese_vocab.json`) is committed to this repo, so you can serve predictions without running the notebook. Python 3.12 is recommended (PyTorch wheels lag very new Python releases).
 
-The pipeline covers end-to-end: GPU-accelerated text preprocessing, hand-crafted NLP features, pre-trained Word2Vec embeddings, Bayesian hyperparameter tuning, and a serialized inference script for production use.
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -r app/requirements.txt      # fastapi, uvicorn, torch — nothing else
+.venv/bin/uvicorn app.main:app --port 8000
+```
+
+Test it:
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"question1": "Do you believe there is life after death?", "question2": "Is it true that there is life after death?"}'
+```
+
+```json
+{
+  "is_duplicate": true,
+  "duplicate_probability": 1.0,
+  "threshold_used": 0.5,
+  "cleaned_q1": "do you believe there is life after death",
+  "cleaned_q2": "is it true that there is life after death"
+}
+```
+
+Interactive Swagger docs at `http://127.0.0.1:8000/docs`. Full endpoint details in [API Reference](#api-reference).
 
 ---
 
-## Performance Optimizations
+## Results
 
-The notebook (`quora_question_pairs_optimize.ipynb`) is purpose-built for speed on large data. Every bottleneck has been addressed:
+All six candidates evaluated on the same held-out test split (~61k rows):
 
-| Stage | Technique | Speedup |
-|-------|-----------|---------|
-| Text Preprocessing | RAPIDS `cudf` — all regex, lowercasing, contraction expansion on GPU | Orders of magnitude vs. CPU pandas |
-| Length Feature Engineering | GPU DataFrame ops via `cudf`, no Python loops | Vectorized, near-instant |
-| Token Feature Extraction | `joblib.Parallel(prefer='threads')` across all CPU cores | ~9,000 rows/sec on 404k rows |
-| Fuzzy String Matching | `rapidfuzz` (GIL-free) + chunked round-robin threading via `joblib` | Eliminates per-row Python overhead |
-| Word2Vec Embedding | `multiprocessing.Pool` (one process per CPU core) | ~37 sec per question column on 404k rows |
-| Hyperparameter Tuning | Optuna TPE + `MedianPruner` + `eval_set` early stopping | Finds good params in 15 trials vs. exhaustive grid |
-| Model Training | XGBoost (`cuda`), LightGBM (`gpu`), CatBoost (`GPU`) | Full GPU utilisation on 282k × 623 feature matrix |
+| Model | F1 | Precision | Recall | AUC | Accuracy | LogLoss |
+|-------|:--:|:---------:|:------:|:---:|:--------:|:-------:|
+| **SiameseLSTM** 🏆 | **0.7986** | 0.7919 | **0.8053** | 0.9181 | **0.8508** | 1.0253 |
+| LightGBM | 0.7776 | 0.7802 | 0.7750 | **0.9201** | 0.8372 | **0.3404** |
+| HistGBM | 0.7736 | 0.7774 | 0.7698 | 0.9183 | 0.8345 | 0.3444 |
+| XGBoost | 0.7735 | 0.7736 | 0.7734 | 0.9175 | 0.8337 | 0.3508 |
+| CatBoost | 0.7413 | 0.7387 | 0.7439 | 0.8945 | 0.8093 | 0.3911 |
+| SGD | 0.6184 | 0.6643 | 0.5784 | 0.8243 | 0.7378 | 0.4920 |
+
+The Siamese LSTM wins on F1, Precision, Recall, and Accuracy — nearly 2 F1 points over the best statistical model. LightGBM keeps the best AUC and Log Loss, meaning its probability *rankings* are better calibrated even though its default-threshold classification is weaker.
+
+SiameseLSTM confusion matrix (rows = actual, columns = predicted):
+
+```
+              Pred 0   Pred 1
+Actual 0      33659     4713
+Actual 1       4336    17936
+```
+
+Exact metrics vary run-to-run (Optuna trials, seeds, epochs). Each notebook run writes a full per-model report to `tuning_results.json`.
+
+---
+
+## Project Structure
+
+```
+quora-question-pairs/
+├── Quora_Question_Pairs.ipynb   # end-to-end training notebook (24 sections)
+├── README.md
+├── requirements-training.txt    # full training environment (Colab/RAPIDS, GPU)
+├── .gitignore
+│
+├── artifacts/                   # trained models, committed — ready for inference
+│   ├── siamese_model.pt         #   Siamese LSTM weights (this run's winner)
+│   ├── siamese_vocab.json       #   LSTM vocabulary + max_len/hidden_dim config
+│   ├── winning_xgb_model.joblib #   best statistical model (filename is legacy; may hold any of the 5 candidates)
+│   └── scaler.joblib            #   fitted StandardScaler for the 623-dim tabular features
+│
+├── app/                         # standalone FastAPI inference service (Siamese LSTM)
+│   ├── main.py                  #   FastAPI app: /health, /predict
+│   ├── lstm_inference.py        #   preprocessing + model loading + predict()
+│   ├── requirements.txt         #   minimal deps: fastapi, uvicorn, torch
+│   └── __init__.py
+│
+└── data/                        # local dataset cache (gitignored, populated by kagglehub)
+```
+
+**Why two requirements files?** `requirements-training.txt` is the heavy GPU environment needed to *run the notebook* (RAPIDS, XGBoost/LightGBM/CatBoost, Optuna, gensim, PyTorch). `app/requirements.txt` is the minimal set needed to *serve* the trained LSTM (`fastapi`, `uvicorn`, `torch` — nothing else).
 
 ---
 
@@ -50,14 +115,7 @@ The notebook (`quora_question_pairs_optimize.ipynb`) is purpose-built for speed 
 
 **Source:** [Kaggle — Quora Question Pairs](https://www.kaggle.com/competitions/quora-question-pairs)
 
-| Property | Value |
-|----------|-------|
-| Raw rows | 404,290 |
-| Usable rows (after null drop) | 404,287 |
-| Columns | 6 |
-| Target | `is_duplicate` (binary) |
-
-**Fields:**
+404,290 rows (404,287 after dropping 3 nulls), downloaded automatically by the notebook via `kagglehub`.
 
 | Column | Description |
 |--------|-------------|
@@ -68,39 +126,12 @@ The notebook (`quora_question_pairs_optimize.ipynb`) is purpose-built for speed 
 
 ---
 
-## Setup & Installation
-
-### 1. Download the Dataset
-
-```bash
-kaggle competitions download -c quora-question-pairs -p /content/
-unzip /content/train.csv.zip
-```
-
-### 2. Install Dependencies
-
-```bash
-pip install numpy==2.0.2 pandas==2.2.2 scikit-learn==1.6.1 \
-    xgboost==3.2.0 lightgbm==4.6.0 catboost==1.2.10 \
-    optuna==4.8.0 gensim==4.4.0 rapidfuzz==3.14.5 \
-    fuzzywuzzy==0.18.0 Distance==0.1.3 nltk==3.9.1 \
-    hvplot==0.12.2 holoviews==1.22.1 bokeh==3.8.2 \
-    tqdm==4.67.3 joblib==1.5.3 matplotlib==3.10.0 seaborn==0.13.2
-
-# RAPIDS GPU support — requires CUDA 12
-pip install cudf-cu12==26.2.1 cupy-cuda12x==14.0.1
-```
-
-> Word2Vec embeddings (`word2vec-google-news-300`, 1.6 GB) are downloaded automatically via `gensim.downloader` on first run and cached locally — no manual download needed.
-
----
-
-## Pipeline
+## Training Pipeline
 
 ```
 Raw CSV
   └── EDA (shape, nulls, class distribution)
-        └── GPU Preprocessing (cudf)
+        └── GPU Preprocessing (cudf, with CPU pandas fallback)
               └── Feature Engineering
                     ├── Length features       (cudf, GPU)
                     ├── Token features        (joblib, CPU parallel)
@@ -108,187 +139,143 @@ Raw CSV
                     └── Word2Vec embeddings   (multiprocessing, CPU parallel)
                           └── Train / Valid / Test Split (70 / 15 / 15)
                                 └── StandardScaler
-                                      └── Optuna Tuning + GPU Model Training
-                                            └── Evaluation → Save Artifacts
+                                      ├── Optuna Tuning (5 statistical models, F1-driven)
+                                      │       └── Threshold Selection (Youden's J)
+                                      └── Siamese LSTM Training (PyTorch, raw text, same split)
+                                            └── Cross-architecture F1 comparison → Save Artifacts
 ```
 
-### Exploratory Data Analysis
+Every stage is optimized for the 404k-row dataset:
 
-- 404,290 rows; 3 nulls dropped
-- Class distribution visualized (duplicate vs. non-duplicate bar chart)
-- Per-question frequency distribution (log-scale histogram)
+| Stage | Technique |
+|-------|-----------|
+| Text preprocessing | RAPIDS `cudf` string ops on GPU (transparent CPU pandas fallback) |
+| Token features | `joblib.Parallel(prefer='threads')` across all CPU cores (~9,000 rows/sec) |
+| Fuzzy matching | `rapidfuzz` (GIL-free) + chunked threading via `joblib` |
+| Word2Vec embedding | `multiprocessing.Pool`, one process per core (~37 sec per question column) |
+| Hyperparameter tuning | Optuna TPE + `MedianPruner`, `eval_set` early stopping |
+| Model training | XGBoost/LightGBM/CatBoost on GPU; PyTorch LSTM on CUDA |
 
-### Preprocessing
-
-All text cleaning runs on GPU via `cudf.Series.str` operations:
-
-- Lowercase and strip whitespace
-- Remove emojis (Unicode block ranges)
-- Strip HTML tags and URLs
-- Expand symbols: `%` → `percent`, `$` → `dollar`, `₹` → `rupee`, etc.
-- Expand 70+ English contractions (`can't` → `cannot`, etc.)
-- Remove punctuation and collapse extra whitespace
+**Preprocessing** (identical at training and inference time — mirrored in [`app/lstm_inference.py`](app/lstm_inference.py)): lowercase and strip, remove emojis, strip HTML/URLs, expand symbols (`%` → `percent`, `$` → `dollar`, …), expand 100+ English contractions, remove punctuation, collapse whitespace.
 
 ---
 
 ## Feature Engineering
 
-The final feature matrix has **623 columns** per row.
+**For the statistical models only** — the final tabular matrix is **623 columns**. The Siamese LSTM skips all of this and consumes the cleaned raw text directly.
 
-### Length Features — 8 columns *(GPU, `cudf`)*
+| Group | Columns | Compute | Features |
+|-------|:-------:|---------|----------|
+| Length | 8 | GPU (`cudf`) | char/token lengths per question, `abs_len_diff`, `mean_len`, min/max char length |
+| Token | 11 | CPU parallel (`joblib`) | `common_words`, `total_words`, common/total ratio, `cwc`/`csc`/`ctc` min-max ratios, first/last word match |
+| Fuzzy | 4 | CPU parallel (`rapidfuzz`) | `fuzz_ratio`, `fuzz_partial_ratio`, `token_sort_ratio`, `token_set_ratio` |
+| Word2Vec | 600 | CPU parallel (`multiprocessing`) | mean of `word2vec-google-news-300` token vectors per question (300 dims × 2 questions) |
 
-| Feature | Description |
-|---------|-------------|
-| `q1_char_len`, `q2_char_len` | Character length of each question |
-| `q1_token_no`, `q2_token_no` | Word count of each question |
-| `abs_len_diff` | Absolute difference in word counts |
-| `mean_len` | Average word count across both questions |
-| `min_char_len`, `max_char_len` | Min and max character lengths |
-
-### Token Features — 11 columns *(CPU parallel, `joblib`)*
-
-| Feature | Description |
-|---------|-------------|
-| `common_words` | Number of shared tokens |
-| `total_words` | Combined token count |
-| `ratio_of_common_to_total` | Common / total token ratio |
-| `cwc_min`, `cwc_max` | Common non-stopword ratio over min/max stopword sets |
-| `csc_min`, `csc_max` | Common non-stopword ratio over min/max token sets |
-| `ctc_min`, `ctc_max` | Common token ratio over min/max token sets |
-| `first_word_eq`, `last_word_eq` | Boolean first/last word match |
-
-### Fuzzy Matching Features — 4 columns *(CPU parallel, `rapidfuzz`)*
-
-| Feature | Description |
-|---------|-------------|
-| `fuzz_ratio` | Character-level edit similarity |
-| `fuzz_partial_ratio` | Best partial substring match |
-| `token_sort_ratio` | Similarity after alphabetically sorting tokens |
-| `token_set_ratio` | Set-based token similarity |
-
-### Word2Vec Embedding Features — 600 columns *(CPU parallel, `multiprocessing`)*
-
-- Model: `word2vec-google-news-300` (300-dimensional vectors)
-- Each question represented as the mean of its token vectors
-- Produces `question1_embedding_0` … `question1_embedding_299` and equivalent for `question2`
+**Siamese LSTM input:** cleaned text → whitespace tokenization → vocabulary of tokens appearing ≥ 4 times (`MIN_FREQ`) → pad/truncate to 40 tokens (`MAX_LEN`). Token embeddings are initialized from the same Word2Vec vectors, then fine-tuned during training (`freeze=False`).
 
 ---
 
-## Modeling & Results
+## Models & Selection
 
-### Data Split
+**Split:** 70% train / 15% validation / 15% test (~282k / ~61k / ~61k rows). The same row split is reused for both model families, so results are directly comparable.
 
-| Split | Rows | Share |
-|-------|------|-------|
-| Train | ~282,000 | 70% |
-| Validation | ~61,000 | 15% |
-| Test | ~61,000 | 15% |
+**Statistical models** — LightGBM, XGBoost, CatBoost, HistGradientBoosting, SGD — each tuned with **Optuna** (TPE sampler + `MedianPruner`) optimizing validation F1, with `eval_set` early stopping for XGBoost/LightGBM, then refit and evaluated on the test split. Since the default 0.5 probability cutoff is arbitrary, a better decision threshold is selected for the best statistical model by maximizing Youden's J (`TPR − FPR`) on the validation ROC curve (section 19).
 
-All features standardized with `StandardScaler` before training.
+**Siamese LSTM** — a bidirectional LSTM encoder shared across both questions (`SiameseEncoder`) produces two sentence encodings, combined as `[h1, h2, |h1−h2|, h1×h2]` and passed through a small MLP. Trained with `BCEWithLogitsLoss` + Adam; the checkpoint with the best validation F1 is kept (section 20).
 
-### Hyperparameter Tuning
+**Winner selection** (section 21) — the true winner is `max(results, key=F1)` across all 6 candidates:
 
-Bayesian optimization via **Optuna** — 15 trials per model using Tree-structured Parzen Estimators (TPE). `MedianPruner` terminates trials that are unlikely to improve on the median. XGBoost and LightGBM additionally use `eval_set` early stopping to avoid overfitting within each trial.
-
-### Results
-
-| Classifier | Test Accuracy | Log Loss | Best Hyperparameters |
-|------------|:-------------:|:--------:|----------------------|
-| **XGBoost** ✓ | **0.8532** | **0.3246** | n_estimators: 956, lr: 0.1266, max_depth: 8 |
-| HistGradientBoosting | 0.8293 | 0.3529 | max_iter: 487, lr: 0.1391, max_leaf_nodes: 52 |
-| CatBoost | 0.8251 | 0.3627 | iterations: 561, lr: 0.1792, depth: 8 |
-| LightGBM | 0.8224 | 0.3680 | n_estimators: 326, lr: 0.0770, num_leaves: 58 |
-| SGD | 0.7395 | 0.4928 | alpha: 0.0036 |
-
-**XGBoost** achieves the highest accuracy (85.32%) and lowest log loss (0.3246). All gradient boosting models substantially outperform the linear SGD baseline, confirming the value of the engineered feature set.
+- The best **statistical** model is always saved (`winning_xgb_model.joblib` + `scaler.joblib`) for the tabular-feature inference path.
+- **If the LSTM is the overall winner** — as in this run — its weights and vocabulary are additionally saved (`siamese_model.pt` + `siamese_vocab.json`) for its own raw-text inference path.
+- `tuning_results.json` records every candidate's metrics, best hyperparameters, the tuned threshold, and the declared winner.
 
 ---
 
-## Saved Artifacts
+## Saved Artifacts & Inference
 
-The following files are written after training:
+| File | Description | In repo? |
+|------|-------------|:---:|
+| `artifacts/siamese_model.pt` | Trained `SiameseEncoder` state dict (this run's winner) | ✅ |
+| `artifacts/siamese_vocab.json` | LSTM vocabulary + `max_len`/`hidden_dim` config | ✅ |
+| `artifacts/winning_xgb_model.joblib` | Best statistical classifier — despite the legacy filename, may be any of the five candidates | ✅ |
+| `artifacts/scaler.joblib` | Fitted `StandardScaler` for the 623-dim tabular features | ✅ |
+| `tuning_results.json` | Per-model metrics + hyperparameters + winner | regenerated each notebook run, not committed |
 
-| File | Description |
-|------|-------------|
-| `winning_xgb_model.joblib` | Trained XGBoost classifier (compressed, `joblib`) |
-| `scaler.joblib` | Fitted `StandardScaler` — required for inference |
-| `tuning_results.json` | Accuracy, log loss, and best params for all five models |
+There are **two separate, non-interchangeable inference paths**, since the two model families consume different inputs:
+
+1. **Siamese LSTM** — [`app/lstm_inference.py`](app/lstm_inference.py): text cleaning + tokenization + PyTorch model, CPU or GPU. This is what the API serves, and it works directly from Python too:
+
+   ```python
+   from app.lstm_inference import load_artifacts, predict
+
+   model, vocab, max_len, device = load_artifacts()
+   result = predict(
+       "Do you believe there is life after death?",
+       "Is it true that there is life after death?",
+       model, vocab, max_len, device,
+   )
+   # {'is_duplicate': True, 'duplicate_probability': 1.0, 'threshold_used': 0.5, ...}
+   ```
+
+2. **Statistical model** — reproduces the full 623-dim feature pipeline on CPU. The code for a standalone `inference.py` lives in **notebook section 23**; it isn't shipped as a repo file since the LSTM won this run.
 
 ---
 
-## Inference
+## Reproducing Training
 
-A standalone inference script (`inference.py`) reproduces the full preprocessing and feature engineering pipeline on CPU — no GPU required at prediction time.
+Training needs a CUDA GPU (Colab or similar) for RAPIDS, GPU gradient boosting, and PyTorch:
 
-**Load artifacts and predict:**
-
-```python
-from inference import load_artifacts, predict
-
-model, scaler, w2v = load_artifacts()
-
-result = predict(
-    "How can I lose weight fast?",
-    "What is the best diet to lose weight?",
-    model, scaler, w2v
-)
-# {'is_duplicate': True, 'duplicate_probability': 0.7X, 'cleaned_q1': ..., 'cleaned_q2': ...}
+```bash
+pip install -r requirements-training.txt
 ```
 
-**Sample predictions from notebook run:**
+Then run [`Quora_Question_Pairs.ipynb`](Quora_Question_Pairs.ipynb) top to bottom. Notes:
+
+- **Kaggle credentials** — section 2 sets up the Kaggle API token; the dataset then downloads automatically via `kagglehub` (section 4).
+- **Word2Vec** — `word2vec-google-news-300` (1.6 GB) downloads automatically via `gensim.downloader` on first run and is cached locally.
+- **RAPIDS is optional** — if `cudf`/`cupy` are unavailable, preprocessing transparently falls back to CPU pandas.
+- Key dependency groups in [`requirements-training.txt`](requirements-training.txt): gradient boosting (`xgboost`, `lightgbm`, `catboost`), tuning (`optuna`), NLP (`gensim`, `nltk`, `rapidfuzz`), deep learning (`torch`), and optionally RAPIDS (`cudf-cu12`, `cupy-cuda12x`). See the file for exact pins.
+
+---
+
+## API Reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Readiness check; confirms the model is loaded |
+| `/predict` | POST | Classify a question pair |
+
+**`POST /predict` request body:**
+
+```json
+{"question1": "string", "question2": "string", "threshold": 0.5}
+```
+
+`threshold` is optional (default `0.5`) — the notebook's Youden's-J-tuned threshold is calibrated for the statistical model, not the LSTM, so it isn't reused here.
+
+**Response:** `is_duplicate` (bool), `duplicate_probability` (float), `threshold_used` (float), plus the cleaned versions of both questions.
+
+Sample predictions from the shipped model:
 
 ```
-Q1: What is the step by step guide to invest in share market in india?
-Q2: What is the step by step guide to invest in share market?
-Duplicate: False  |  Probability: 0.4095
-
 Q1: Do you believe there is life after death?
 Q2: Is it true that there is life after death?
-Duplicate: True   |  Probability: 0.5842
+  -> duplicate=True   prob=1.0000
+
+Q1: How do I learn Python?
+Q2: What is the best way to bake a chocolate cake?
+  -> duplicate=False  prob=0.0000
+
+Q1: What is the step by step guide to invest in share market in india?
+Q2: What is the step by step guide to invest in share market?
+  -> duplicate=False  prob=0.0133   # a genuinely hard near-duplicate case
 ```
-
----
-
-## Requirements
-
-**Runtime:** Python 3.12 · CUDA 12 (GPU required for training; CPU sufficient for inference)
-
-| Package | Version | Role |
-|---------|---------|------|
-| `numpy` | 2.0.2 | Numerical computing |
-| `pandas` | 2.2.2 | Data manipulation |
-| `matplotlib` | 3.10.0 | Plotting |
-| `seaborn` | 0.13.2 | Statistical visualizations |
-| `tqdm` | 4.67.3 | Progress bars |
-| `joblib` | 1.5.3 | Parallelism & model serialization |
-| `scikit-learn` | 1.6.1 | HistGBM, StandardScaler, metrics |
-| `cudf-cu12` | 26.2.1 | GPU DataFrames (RAPIDS) |
-| `cupy-cuda12x` | 14.0.1 | GPU array backend (RAPIDS) |
-| `xgboost` | 3.2.0 | Gradient boosting (GPU) |
-| `lightgbm` | 4.6.0 | Gradient boosting (GPU) |
-| `catboost` | 1.2.10 | Gradient boosting (GPU) |
-| `optuna` | 4.8.0 | Bayesian hyperparameter tuning |
-| `gensim` | 4.4.0 | Word2Vec embeddings |
-| `nltk` | 3.9.1 | Stopword corpus |
-| `rapidfuzz` | 3.14.5 | High-performance fuzzy matching |
-| `fuzzywuzzy` | 0.18.0 | Fuzzy matching (legacy compatibility) |
-| `Distance` | 0.1.3 | String distance utilities |
-| `hvplot` | 0.12.2 | Interactive plots |
-| `holoviews` | 1.22.1 | High-level plotting layer |
-| `bokeh` | 3.8.2 | Plot rendering backend |
 
 ---
 
 ## Contributing
 
-Contributions are welcome in the following areas:
-
-- Improved preprocessing (stemming, lemmatization, subword tokenization)
-- Additional feature engineering (TF-IDF overlap, BM25 similarity)
-- Deep learning models (Siamese networks, sentence transformers)
-- Inference API (FastAPI / Gradio wrapper)
-
-Please open an issue before submitting a pull request to discuss the proposed change.
+Welcome areas: a proper threshold-selection pass for the LSTM (currently fixed at 0.5), containerizing `app/` (Dockerfile), a batch-prediction endpoint, sentence-transformer / cross-encoder baselines, and richer features (TF-IDF overlap, BM25 similarity). Please open an issue before submitting a pull request.
 
 ---
 
