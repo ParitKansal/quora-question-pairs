@@ -37,28 +37,28 @@ Download dataset for custom training - [Dataset](https://drive.google.com/file/d
 
 ### EDA
 
-- **Null Value:**
+- **Null Value :**  
   Analysis of the questions that contain null values. If the number of rows with null values is significantly smaller than the total number of rows, it may be reasonable to delete those rows.
 
-- **Duplicate vs Non-Duplicate Analysis:**
+- **Duplicate vs Non-Duplicate Analysis :**  
   Calculate the number of question pairs identified as duplicates and those deemed non-duplicates. Then, analyze the frequency of repeated questions and the number of occurrences.
 
 ### Preprocessing
 
-- **Lower Case:**
+- **Lower Case :**  
   Convert all the questions in the dataset to lowercase. This ensures uniformity in the text data and facilitates comparison and analysis.
-- **Remove Emoji:**
+- **Remove Emoji :**  
   Remove all emojis present in the questions in the dataset. Emojis do not contribute to the semantic meaning of the text and can introduce noise in the analysis.
 
 
-- **Remove HTML:**
+- **Remove HTML :**  
   Remove all HTML links in the questions. HTML tags are not relevant for text analysis and can be safely removed.
 
 
-- **Remove URL:**
+- **Remove URL :**  
   Remove all URLs from the questions. URLs often do not contribute to the semantic content of the text and can be considered noise.
 
-- **Replace Certain Special Characters with Their String Equivalents:**
+- **Replace Certain Special Characters with Their String Equivalents :**  
    Replace specific special characters with their string equivalents. This ensures that special characters are treated consistently during text processing.
   - '%'         ->      ' percent'
   - '$'         ->      ' dollar '
@@ -67,13 +67,13 @@ Download dataset for custom training - [Dataset](https://drive.google.com/file/d
   - '@'         ->      ' at '
   - '[math]'    ->      ''
 
-- **Replace Contractions:**
+- **Replace Contractions :**  
   Replace all contractions with their expansions. This helps standardize the text and avoids ambiguity in interpretation.
   - "ain't" -> "am not"
   - "aren't" -> "are not" 
      etc.
 
-- **Remove Punctuations:**
+- **Remove Punctuations :**  
   Remove all punctuation marks present in the questions. Punctuation marks typically do not contribute to the semantic meaning of the text and can be safely discarded.
 
 ### Feature Engineering
@@ -91,7 +91,7 @@ Download dataset for custom training - [Dataset](https://drive.google.com/file/d
     - **longest_substr_ratio_min** : Ratio of longest common substring to min question len
     - **longest_substr_ratio_max** : Ratio of longest common substring to max question len.
 
-- **fetch_token_features**
+- **fetch_token_features :**
     - **common_words** : no of common words/tokens
     - **total_words** : total words/tokens (q1_tokens + q2_tokens)
     - **ratio_of_common_to_total** : ratio of common tokens to total tokens (common_words / total_words)
@@ -104,7 +104,7 @@ Download dataset for custom training - [Dataset](https://drive.google.com/file/d
     - **last_word_eq** : 1 if the last word in the two questions is same, 0 otherwise
     - **first_word_eq** : 1 if the first word in the two questions is same, 0 otherwise
 
-- **fetch_fuzzy_features**
+- **fetch_fuzzy_features :**
     - **fuzz_ratio** : fuzz.QRatio from fuzzywuzzy
     - **fuzz_partial_ratio** : fuzz.partial_ratio from fuzzywuzzy
     - **token_sort_ratio** :  fuzz.token_sort_ratio from fuzzywuzzy
@@ -113,6 +113,54 @@ Download dataset for custom training - [Dataset](https://drive.google.com/file/d
 ### word2vec
 - Applied pretained model of word2vec of GoogleNews on question1, question2 columns of the preprocessed data.
 - Download dataset after applying preprocessing and word2vec- [Processed Dataset](https://drive.google.com/file/d/1-0FVCRRCBv2kMAibJqtGo4B7ua54g-N8/view?usp=sharing)
+
+### Modeling
+- **Type of model selection :**  
+  Perform train_test_split from sklearn.model_selection.  
+  Perform Random Forest Classifier from sklearn.ensemble and fit the dataset to train the model. On testing the model, the accuracy obtained is 0.772.  
+  Perform SVM classifier from sklearn library and fit the dataset to train the model. On testing the model, the accuracy obtained is 0.705.  
+  Since, the accuracy of the Random Forest model is better than the SVM model, therefore we move forward with the Random Forest Model.
+
+- **Hyperparameter Tuning of Random Forest Model :**
+  - **Tuning and training of model to determine best parameter :**
+      Use GridSearchCV from sklearn.model_selection to cross validate 5 times and hyper parameterize the parameters to determine the best of the parameters.
+      The best values of these parameters are obtained as:
+      - n_estimators : 115
+      - criterion : 'log_loss'
+      - max_depth : None
+      - max_features : 0.5
+      - max_samples : 1.0
+
+- **Final Modelling :**  
+  Perform Random Forest Classifier from sklearn.ensemble and fit the dataset to train the model based on the before estimated best values of the parameter and test the model to determine its accuracy. The accuracy obtained is  .  
+
+  Download trained model : [Final Model](https://drive.google.com/file/d/1ge8lHgEk9BSrkRZJEfbLSbYCTGQOwG6b/view?usp=drive_link)
+## Deployment of Model in Jupyter Notebook
+
+- Download dataset after applying preprocessing and word2vec- [Processed Dataset](https://drive.google.com/file/d/1-0FVCRRCBv2kMAibJqtGo4B7ua54g-N8/view?usp=sharing)  
+- Run the following comands in python notebook
+  ```bash
+  df = pd.read_csv("link_of_downloaded_Processes_Dataset")
+  ```
+  ```bash
+  from sklearn.model_selection import train_test_split
+  X_train, X_test, y_train, y_test = train_test_split(df.drop(columns=['id', 'qid1', 'qid2', 'question1', 'question2', 'is_duplicate']), df['is_duplicate'], test_size=0.25, random_state=0)
+  ```
+- Download trained model : [Final Model](https://drive.google.com/file/d/1ge8lHgEk9BSrkRZJEfbLSbYCTGQOwG6b/view?usp=drive_link)
+- Run the following comands in python notebook after previous commands
+  ```bash
+  import pickle
+  model = pickle.load(open('link_of_downoaded_model', 'rb'))
+  ```
+  ```bash
+  y_pred = model.predict(X_test)
+  ```
+  ```bash
+  from sklearn.metrics import accuracy_score, confusion_matrix
+  print("Accuracy : ", accuracy_score(y_pred,y_test))
+  print("Confusion Matrix : ")
+  print(confusion_matrix(y_pred, y_test))
+  ```
 
 ## License
 
