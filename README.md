@@ -99,12 +99,14 @@ Utilized the `fuzzywuzzy` package to compute:
 ### Classifiers Implemented
 
 * Logistic Regression
+* LinearSVC
 * Random Forest
 * Extra Trees
 * Gradient Boosting
-* K-Nearest Neighbors (KNN)
+* LightGBM
 * XGBoost
 * Naive Bayes
+* AdaBoost
 
 ### Evaluation Metrics
 
